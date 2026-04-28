@@ -11,6 +11,7 @@ export default defineConfig({
     seed: "npx tsx prisma/seed.ts",
   },
   datasource: {
+    url: `file:${dbPath}`,
     adapter: new PrismaBetterSqlite3({ url: dbPath }),
   },
 });
