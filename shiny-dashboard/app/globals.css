@@ -1,0 +1,52 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+
+  /* Brand colors */
+  --color-navy: #1B4F8A;
+  --color-teal: #2E8B7A;
+  --color-gold: #F59E0B;
+
+  /* Status badge colors */
+  --color-status-site-bg: #E6F1FB;
+  --color-status-site-text: #0C447C;
+  --color-status-site-dot: #378ADD;
+
+  --color-status-ai-bg: #FAEEDA;
+  --color-status-ai-text: #633806;
+  --color-status-ai-dot: #EF9F27;
+
+  --color-status-moon-bg: #FAECE7;
+  --color-status-moon-text: #4A1B0C;
+  --color-status-moon-dot: #D85A30;
+
+  --color-status-sent-bg: #EAF3DE;
+  --color-status-sent-text: #173404;
+  --color-status-sent-dot: #639922;
+
+  --color-status-follow-bg: #EEEDFE;
+  --color-status-follow-text: #26215C;
+  --color-status-follow-dot: #7F77DD;
+
+  --color-status-won-bg: #E1F5EE;
+  --color-status-won-text: #04342C;
+  --color-status-won-dot: #1D9E75;
+
+  --color-status-lost-bg: #FCEBEB;
+  --color-status-lost-text: #501313;
+  --color-status-lost-dot: #E24B4A;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
