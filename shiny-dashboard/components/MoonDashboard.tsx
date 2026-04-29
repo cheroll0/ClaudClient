@@ -3,6 +3,9 @@
 import { useEffect, useState } from "react";
 import StatusBadge from "./StatusBadge";
 import ServiceTag from "./ServiceTag";
+import EstimateBuilder from "./EstimateBuilder";
+import EstimatePreview from "./EstimatePreview";
+import { type EstimateLineItem, formatPrice } from "@/lib/pricing";
 
 interface Job {
   id: number;
@@ -21,7 +24,11 @@ interface Job {
   hours: number | null;
   basePrice: number | null;
   addons: number | null;
+  billingName: string | null;
+  billingEmail: string | null;
 }
+
+type DetailView = "overview" | "build" | "preview";
 
 function timeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -42,7 +49,11 @@ function parseJSON(val: string | null): string[] {
 export default function MoonDashboard() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [selected, setSelected] = useState<Job | null>(null);
+  const [detailView, setDetailView] = useState<DetailView>("overview");
+  const [estimateItems, setEstimateItems] = useState<EstimateLineItem[]>([]);
+  const [estimateTotal, setEstimateTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
 
   const fetchJobs = async () => {
     const res = await fetch("/api/jobs");
@@ -56,25 +67,112 @@ export default function MoonDashboard() {
   const pending = jobs.filter((j) => j.status === "Pending Moon Review");
   const recentlySent = jobs.filter((j) => j.status === "Estimate Sent");
 
-  const handleApprove = async (job: Job) => {
-    await fetch(`/api/jobs/${job.id}`, {
+  const handleApprove = async () => {
+    if (!selected) return;
+    setSaving(true);
+    await fetch(`/api/jobs/${selected.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: "Estimate Sent" }),
+      body: JSON.stringify({ status: "Estimate Sent", value: estimateTotal }),
     });
     await fetchJobs();
     setSelected(null);
+    setDetailView("overview");
+    setSaving(false);
+  };
+
+  const openJob = (job: Job) => {
+    setSelected(job);
+    setDetailView("overview");
+    // Pre-seed estimate total from existing job value
+    setEstimateTotal(job.value);
+    setEstimateItems([]);
   };
 
   if (loading) {
+    return <div className="p-6 text-center text-gray-400 text-[14px]">Loading...</div>;
+  }
+
+  // ── ESTIMATE PREVIEW ───────────────────────────────────────────────────────
+  if (selected && detailView === "preview") {
+    const flags = parseJSON(selected.aiFlags);
+    const scopeLines = [
+      selected.aiSummary,
+      flags.length > 0 ? `Flagged: ${flags.join("; ")}` : null,
+    ].filter(Boolean).join(" ");
+
     return (
-      <div className="p-6 text-center text-gray-400 text-[14px]">Loading...</div>
+      <div className="max-w-2xl mx-auto p-4">
+        <EstimatePreview
+          job={selected}
+          items={estimateItems}
+          total={estimateTotal}
+          serviceDescription={scopeLines}
+          onApprove={handleApprove}
+          onBack={() => setDetailView("build")}
+          saving={saving}
+        />
+      </div>
     );
   }
 
-  if (selected) {
+  // ── ESTIMATE BUILDER ───────────────────────────────────────────────────────
+  if (selected && detailView === "build") {
+    return (
+      <div className="max-w-2xl mx-auto p-4 space-y-5">
+        <div className="flex items-center justify-between">
+          <button
+            onClick={() => setDetailView("overview")}
+            className="text-[13px] text-gray-500 flex items-center gap-1 hover:text-gray-700"
+          >
+            ← Back to overview
+          </button>
+          <button
+            onClick={() => setDetailView("preview")}
+            disabled={estimateItems.length === 0}
+            className="px-4 py-2 rounded-lg text-white text-[13px] font-medium disabled:opacity-40"
+            style={{ backgroundColor: "#1B4F8A" }}
+          >
+            Preview Estimate →
+          </button>
+        </div>
+
+        <div>
+          <div className="text-[16px] font-bold text-gray-900">{selected.client}</div>
+          <div className="text-[12px] text-gray-400">{selected.address} · {selected.sqft.toLocaleString()} sq ft · {selected.type}</div>
+        </div>
+
+        {/* Live total */}
+        <div
+          className="rounded-xl p-4 flex items-center justify-between"
+          style={{ backgroundColor: "#F0FDF9", border: "1px solid #A7F3D0" }}
+        >
+          <span className="text-[13px] font-medium" style={{ color: "#2E8B7A" }}>
+            Running Total ({estimateItems.length} line item{estimateItems.length !== 1 ? "s" : ""})
+          </span>
+          <span className="text-[20px] font-bold" style={{ color: "#166534" }}>
+            {formatPrice(estimateTotal)}
+          </span>
+        </div>
+
+        <EstimateBuilder
+          jobType={selected.type}
+          sqft={selected.sqft}
+          initialServices={parseJSON(selected.services)}
+          onEstimateChange={(items, total) => {
+            setEstimateItems(items);
+            setEstimateTotal(total);
+          }}
+        />
+      </div>
+    );
+  }
+
+  // ── JOB OVERVIEW ──────────────────────────────────────────────────────────
+  if (selected && detailView === "overview") {
     const services = parseJSON(selected.services);
     const flags = parseJSON(selected.aiFlags);
+
     return (
       <div className="max-w-2xl mx-auto p-4 space-y-4">
         <button
@@ -93,69 +191,67 @@ export default function MoonDashboard() {
           )}
         </div>
 
-        {/* 2-column grid: client + scope */}
+        {/* 2-col summary */}
         <div className="grid grid-cols-2 gap-3">
-          <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-1">
-            <div className="text-[11px] font-medium text-gray-400 uppercase tracking-wide">Client</div>
+          <div className="bg-white border border-gray-200 rounded-xl p-4">
+            <div className="text-[11px] font-medium text-gray-400 uppercase tracking-wide mb-1">Client</div>
             <div className="text-[14px] font-bold text-gray-900">{selected.client}</div>
-            <div className="text-[12px] text-gray-400">{selected.address}</div>
+            <div className="text-[12px] text-gray-400 mt-0.5">{selected.address}</div>
             <div className="text-[12px] text-gray-500 mt-1">{selected.type}</div>
+            {selected.billingName && (
+              <div className="text-[11px] text-gray-400 mt-1">Billing: {selected.billingName}</div>
+            )}
           </div>
-          <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-2">
-            <div className="text-[11px] font-medium text-gray-400 uppercase tracking-wide">Scope</div>
-            <div className="text-[14px] font-bold text-gray-900">
-              {selected.sqft.toLocaleString()} sq ft
-            </div>
-            <div className="flex flex-wrap gap-1">
+          <div className="bg-white border border-gray-200 rounded-xl p-4">
+            <div className="text-[11px] font-medium text-gray-400 uppercase tracking-wide mb-1">Scope</div>
+            <div className="text-[14px] font-bold text-gray-900">{selected.sqft.toLocaleString()} sq ft</div>
+            <div className="flex flex-wrap gap-1 mt-2">
               {services.map((s) => <ServiceTag key={s} label={s} />)}
             </div>
           </div>
         </div>
 
         {/* AI Analysis */}
-        <div
-          className="bg-white border border-gray-200 rounded-xl p-4 border-l-4"
-          style={{ borderLeftColor: "#2E8B7A" }}
-        >
-          <div className="text-[11px] font-bold uppercase tracking-widest mb-2" style={{ color: "#2E8B7A" }}>
-            AI Analysis
-          </div>
-          <p className="text-[13px] text-gray-700 leading-relaxed">{selected.aiSummary}</p>
-          {flags.length > 0 && (
-            <div className="mt-3 space-y-1.5">
-              <div className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">Flagged items</div>
-              {flags.map((flag, i) => (
-                <div key={i} className="flex items-start gap-2 text-[13px] text-gray-700">
-                  <span className="mt-1 w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: "#F59E0B" }} />
-                  {flag}
-                </div>
-              ))}
+        {selected.aiSummary && (
+          <div className="bg-white border border-gray-200 rounded-xl p-4 border-l-4" style={{ borderLeftColor: "#2E8B7A" }}>
+            <div className="text-[11px] font-bold uppercase tracking-widest mb-2" style={{ color: "#2E8B7A" }}>
+              AI Analysis
             </div>
-          )}
-        </div>
-
-        {/* Estimate Breakdown */}
-        <div className="bg-white border border-gray-200 rounded-xl p-4">
-          <div className="text-[11px] font-bold text-gray-700 uppercase tracking-wide mb-3">
-            Estimate Breakdown
+            <p className="text-[13px] text-gray-700 leading-relaxed">{selected.aiSummary}</p>
+            {flags.length > 0 && (
+              <div className="mt-3 space-y-1.5">
+                <div className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">Flagged items</div>
+                {flags.map((flag, i) => (
+                  <div key={i} className="flex items-start gap-2 text-[13px] text-gray-700">
+                    <span className="mt-1 w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: "#F59E0B" }} />
+                    {flag}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
+        )}
+
+        {/* Current estimate snapshot */}
+        <div className="bg-white border border-gray-200 rounded-xl p-4">
+          <div className="text-[11px] font-bold text-gray-700 uppercase tracking-wide mb-3">Current Estimate</div>
           <div className="space-y-2">
             <div className="flex justify-between text-[13px]">
               <span className="text-gray-500">Base service</span>
-              <span className="font-medium">${(selected.basePrice ?? 0).toLocaleString()}</span>
+              <span className="font-medium">{formatPrice(selected.basePrice ?? 0)}</span>
             </div>
             <div className="flex justify-between text-[13px]">
               <span className="text-gray-500">Add-ons & specialty</span>
-              <span className="font-medium">${(selected.addons ?? 0).toLocaleString()}</span>
+              <span className="font-medium">{formatPrice(selected.addons ?? 0)}</span>
             </div>
             <div className="flex justify-between text-[13px]">
-              <span className="text-gray-500">Estimated hours</span>
+              <span className="text-gray-500">Est. hours</span>
               <span className="font-medium">{selected.hours ?? 0}h</span>
             </div>
             <div className="border-t border-gray-100 pt-2 flex justify-between">
-              <span className="text-[14px] font-bold text-gray-900">Total Estimate</span>
+              <span className="text-[14px] font-bold text-gray-900">Total</span>
               <span className="text-[16px] font-bold" style={{ color: "#166534" }}>
-                ${selected.value.toLocaleString()}
+                {formatPrice(selected.value)}
               </span>
             </div>
           </div>
@@ -164,27 +260,28 @@ export default function MoonDashboard() {
         {/* Actions */}
         <div className="flex gap-3">
           <button
-            onClick={() => handleApprove(selected)}
+            onClick={() => setDetailView("build")}
             className="flex-1 py-2.5 rounded-lg text-white text-[14px] font-medium"
             style={{ backgroundColor: "#2E8B7A" }}
           >
-            Approve & Send ↗
+            Build Estimate with Moon's Pricing
           </button>
           <button
+            onClick={handleApprove}
             className="flex-1 py-2.5 rounded-lg text-[14px] font-medium border border-gray-200 text-gray-700 bg-white"
           >
-            Adjust Estimate
+            Approve As-Is ↗
           </button>
         </div>
       </div>
     );
   }
 
+  // ── QUEUE LIST ─────────────────────────────────────────────────────────────
   return (
     <div className="max-w-2xl mx-auto p-4 space-y-6">
-      {/* Pending Review Queue */}
       <section>
-        <div className="flex items-center gap-2 mb-3">
+        <div className="flex items-center gap-2 mb-1">
           <h2 className="text-[15px] font-bold text-gray-900">Pending Review Queue</h2>
           <span className="px-2 py-0.5 rounded-full text-[11px] font-medium bg-gray-100 text-gray-500">
             {pending.length}
@@ -202,7 +299,7 @@ export default function MoonDashboard() {
               return (
                 <button
                   key={job.id}
-                  onClick={() => setSelected(job)}
+                  onClick={() => openJob(job)}
                   className="w-full text-left bg-white border border-gray-200 rounded-xl p-4 border-l-4 transition-shadow hover:shadow-sm"
                   style={{ borderLeftColor: job.urgent ? "#EF4444" : "#2E8B7A" }}
                 >
@@ -224,8 +321,8 @@ export default function MoonDashboard() {
                     <div className="flex flex-wrap gap-1">
                       {services.slice(0, 3).map((s) => <ServiceTag key={s} label={s} />)}
                     </div>
-                    <span className="text-[14px] font-bold ml-2" style={{ color: "#166534" }}>
-                      ${job.value.toLocaleString()}
+                    <span className="text-[14px] font-bold ml-2" style={{ color: "#166634" }}>
+                      {formatPrice(job.value)}
                     </span>
                   </div>
                 </button>
@@ -235,7 +332,6 @@ export default function MoonDashboard() {
         )}
       </section>
 
-      {/* Recently Sent */}
       {recentlySent.length > 0 && (
         <section>
           <h2 className="text-[15px] font-bold text-gray-900 mb-3">Recently Sent</h2>
@@ -243,10 +339,7 @@ export default function MoonDashboard() {
             {recentlySent.map((job) => {
               const services = parseJSON(job.services);
               return (
-                <div
-                  key={job.id}
-                  className="bg-white border border-gray-200 rounded-xl p-4"
-                >
+                <div key={job.id} className="bg-white border border-gray-200 rounded-xl p-4">
                   <div className="flex items-start justify-between">
                     <div>
                       <div className="text-[14px] font-bold text-gray-900">{job.client}</div>
@@ -255,7 +348,7 @@ export default function MoonDashboard() {
                     <div className="flex items-center gap-2 flex-shrink-0 ml-2">
                       <StatusBadge status="Estimate Sent" />
                       <span className="text-[14px] font-bold" style={{ color: "#166534" }}>
-                        ${job.value.toLocaleString()}
+                        {formatPrice(job.value)}
                       </span>
                     </div>
                   </div>

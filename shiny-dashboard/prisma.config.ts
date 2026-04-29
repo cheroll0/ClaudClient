@@ -10,8 +10,9 @@ export default defineConfig({
     path: "prisma/migrations",
     seed: "npx tsx prisma/seed.ts",
   },
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   datasource: {
     url: `file:${dbPath}`,
     adapter: new PrismaBetterSqlite3({ url: dbPath }),
-  },
+  } as any,
 });
